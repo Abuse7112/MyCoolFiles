@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+	<meta name="Cross-Origin-Opener-Policy" content="same-origin">
+	<title>Download Link Generator for Drive™</title>
+	<link rel="icon" href="favicon.png">
+	<style>
+	table, td
+	{
+		border: 1px solid #888;
+		border-collapse: collapse;
+	}
+	td
+	{
+		padding: 0px 4px 0px 4px;
+		border-left: none;
+		border-right: none;
+	}
+	td > pre
+	{
+		margin: 7px 0px 7px 0px;
+	}
+	pre.wordwrapped /* Source: https://stackoverflow.com/a/248013/2373034 */
+	{
+		white-space: pre-wrap;       /* Since CSS 2.1 */
+		white-space: -moz-pre-wrap;  /* Mozilla, since 1999 */
+		white-space: -pre-wrap;      /* Opera 4-6 */
+		white-space: -o-pre-wrap;    /* Opera 7 */
+		word-wrap: break-word;       /* Internet Explorer 5.5+ */
+	}
+	</style>
+</head>
+<body style="font-family: Helvetica, sans-serif; margin-bottom: 60px;">
+
+	<div style="max-width:680px; margin:0 auto; padding-top: 10px; line-height: 130%;">
+	
+	<h3 style="text-align:center;">Download Link Generator for Drive™</h3>
+	
+	<p style="text-align:center;"><a href="https://github.com/yasirkula/DownloadLinkGeneratorForGoogleDrive">Source Code</a> | <a href="https://gsuite.google.com/marketplace/app/download_link_generator_for_drive/631283629814">Marketplace</a></p>
+	
+	<p>This Drive™ extension/add-on lets you generate direct download links for the files in your Drive™ storage. Simply right click the file/folder in your Drive™ and select <i>Open with-&gt;Download Link Generator</i>. When a folder is selected, download links for all the files in that folder are generated. If <i>Download Link Generator</i> button isn't present, then you may first need to authorize this extension by clicking the <i>Authorize</i> button below.</p>
+	
+	<p>For the generated download links to work everywhere, you need to make the file/folder public. To do this, you can right click the file/folder, select <i>Get link</i> and change visibility from <i>Restricted</i> to <i>Anyone with the link</i>.</p>
+	
+	<details><summary><b>Privacy Notice <i>(click to expand)</i></b></summary>
+	
+	<p>This extension accesses the metadata of the selected file/folder and reads its download link from that metadata. All communications with the Drive™ servers is handled via the official <i>Drive™ Javascript API</i> and your Drive™ data is not stored in any way in our databases. This extension's use of information received from Google APIs adheres to <a href="https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+	
+	<p>Regarding the "<i>See information about your Google Drive files</i>" permission asked during the authorization:</p>
+	
+	<ul>
+		<li><b>The titles and descriptions of your files:</b> names and the download links of the files that you've opened with this extension will be accessed</li>
+		<li><b>The names and email addresses of people you share files with:</b> this extension doesn't access this info, this is just a generic text explaining the extents of the permission that this extension asks for. It doesn't necessarily mean that the extension accesses that data</li>
+		<li><b>Your folders and how files are organized:</b> when a folder is opened with this extension, names and download links of all files inside that directory will be read by this extension</li>
+	</ul>
+	
+	<p>This extension is hosted at <i>yasirkula.net</i> website and is subject to its <a href="https://yasirkula.net/privacy-policy/">Privacy Policy</a>.</p>
+	
+	</details>
+	
+	<p><hr /></p>
+	
+	<div id="authorize-div" style="display:none">
+		<b>You need to authorize access to Drive first:</b> <button id="authorize-button" onclick="handleAuthClick()">Authorize</button>
+	</div>
+	
+	<p id="pre-check-error" style="color:red; display:none;"></p>
+	
+	<p id="result-filters" style="display:none">
+		Display results for: 
+		<select onchange="onResultsTypeChanged(this.selectedIndex)">
+			<option selected>Download links</option>
+			<option>Preview links</option>
+			<option>Image embed links</option>
+		</select><br />
+		
+		<input type="checkbox" id="result-table-toggle-input" onchange="onResultsDisplayMethodChanged(this)">
+		<label for="result-table-toggle-input">Display results as table</label>
+	</p>
+	
+	</div>
+	
+	<pre id="status" style="max-width:680px; margin:0 auto;" class="wordwrapped"><b>Status: <span style="color:blue;">connecting to Drive™ servers, please wait... <i>(If nothing happens, please make sure that pop-ups are enabled and try again since authorization is handled via a pop-up)</i></span></b></pre><br />
+	
+	<div id="result-download-links-holder" style="display:block">
+		<pre id="result-download-links" style="display:table; margin:0 auto;"></pre>
+		<table id="result-download-links-table" style="display:none; margin:0 auto;"></table><br />
+	</div>
+	
+	<div id="result-preview-links-holder" style="display:none">
+		<pre id="result-preview-links" style="display:table; margin:0 auto;"></pre>
+		<table id="result-preview-links-table" style="display:none; margin:0 auto;"></table><br />
+	</div>
+	
+	<div id="result-embed-links-holder" style="display:none">
+		<pre id="result-embed-links" style="display:table; margin:0 auto;"></pre>
+		<table id="result-embed-links-table" style="display:none; margin:0 auto;"></table><br />
+	</div>
+	
+	<pre id="error" style="color: red; max-width:680px; margin:0 auto;" class="wordwrapped"></pre>
+	
+	<script>
+	var CLIENT_ID = 'YOUR_APP_CLIENT_ID';
+	var API_KEY = 'YOUR_APP_API_KEY';
+	var DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
+	var SCOPES = 'https://www.googleapis.com/auth/drive.install https://www.googleapis.com/auth/drive.metadata.readonly';
+
+	var statusText = document.getElementById( 'status' );
+	var errorText = document.getElementById( 'error' );
+	var preCheckErrorText = document.getElementById( 'pre-check-error' );
+	var authorizeButton = document.getElementById( 'authorize-div' );
+	var resultFilters = document.getElementById( 'result-filters' );
+	
+	var resultDownloadLinksHolder = document.getElementById('result-download-links-holder');
+	var resultDownloadLinksText = document.getElementById('result-download-links');
+	var resultDownloadLinksTable = document.getElementById('result-download-links-table');
+	
+	var resultPreviewLinksHolder = document.getElementById('result-preview-links-holder');
+	var resultPreviewLinksText = document.getElementById('result-preview-links');
+	var resultPreviewLinksTable = document.getElementById('result-preview-links-table');
+	
+	var resultEmbedLinksHolder = document.getElementById('result-embed-links-holder');
+	var resultEmbedLinksText = document.getElementById('result-embed-links');
+	var resultEmbedLinksTable = document.getElementById('result-embed-links-table');
+	
+	var userId = "";
+	var preCheckError = "You need to right click a file/folder in Drive and select 'Open with->Download Link Generator'.";
+	
+	var gapiInited = false;
+	var gisInited = false;
+	var tokenClient;
+	
+	var openedMultipleFilesAtOnce = false;
+	var openedFileIdsStack = [];
+	var waitingFoldersStack = [];
+	
+	function gapiLoaded()
+	{
+		gapi.load( 'client', initializeGapiClient );
+	}
+	
+	async function initializeGapiClient()
+	{
+		await gapi.client.init( {
+			apiKey: API_KEY,
+			discoveryDocs: [DISCOVERY_DOC]
+		} );
+
+		gapiInited = true;
+		checkAuth();
+	}
+	
+	function gisLoaded()
+	{
+		tokenClient = google.accounts.oauth2.initTokenClient( {
+			client_id: CLIENT_ID,
+			scope: SCOPES,
+			callback: ''
+		} );
+		
+		gisInited = true;
+		checkAuth();
+	}
+	
+	function checkAuth()
+	{
+		if( !gapiInited || !gisInited )
+			return;
+		
+		var parameters = getQueryVariable( 'state' );
+		if( parameters && parameters.length > 0 )
+		{
+			var parametersJSON = JSON.parse( parameters );
+			if( parametersJSON )
+			{
+				if( parametersJSON.action == "open" )
+				{
+					if( parametersJSON.ids )
+					{
+						if( parametersJSON.ids.length > 0 )
+						{
+							for( var i = 0; i < parametersJSON.ids.length; i++ ) 
+								openedFileIdsStack.push( parametersJSON.ids[i] );
+							
+							openedMultipleFilesAtOnce = ( openedFileIdsStack.length > 1 );
+							preCheckError = "";
+						}
+					}
+					else
+						preCheckError = "Download links can't be generated for documents created in Drive. You should first convert the document to a downloadable format (e.g. .doc, .docx, .ppt, .xls).";
+				}
+				else if( parametersJSON.action == "create" && parametersJSON.folderId )
+				{
+					openedFileIdsStack.push( parametersJSON.folderId );
+					preCheckError = "";
+				}
+				else
+					preCheckError = "Invalid state, please try again.";
+				
+				if( parametersJSON.userId )
+					userId = parametersJSON.userId;
+			}
+		}
+		
+		tokenClient.callback = handleAuthResult;
+		
+		tokenClient.requestAccessToken( {
+			prompt: 'none',
+			hint: userId
+		} );
+	}
+	
+	function handleAuthClick()
+	{
+		tokenClient.requestAccessToken( {
+			prompt: 'select_account',
+			hint: userId
+		} );
+		
+		return false;
+	}
+
+	function handleAuthResult( authResult )
+	{
+		if( authResult && !authResult.error && google.accounts.oauth2.hasGrantedAllScopes( authResult, 'https://www.googleapis.com/auth/drive.metadata.readonly' ) )
+		{
+			authorizeButton.style.display = 'none';
+			
+			if( preCheckError.length > 0 )
+			{
+				statusText.innerHTML = "";
+				preCheckErrorText.style.display = 'block';
+				preCheckErrorText.innerHTML = "<b>" + preCheckError + "</b>";
+			}
+			else
+			{
+				resultFilters.style.display = 'block';
+				statusText.innerHTML = "<b>Status: <span style=\"color:blue;\">generating download link(s), please wait...</span></b>";
+				
+				getDownloadLinkForOpenedFileOrFolder( openedFileIdsStack.shift() );
+			}
+		}
+		else
+		{
+			authorizeButton.style.display = 'block';
+			preCheckErrorText.style.display = 'none';
+			statusText.innerHTML = "";
+		}
+	}
+	
+	function getDownloadLinkForOpenedFileOrFolder( fileId )
+	{
+		var request = gapi.client.drive.files.get({
+			'fileId': fileId,
+			'fields': "mimeType, name, webContentLink, webViewLink",
+			'supportsAllDrives': "true"
+		});
+		
+		request.execute( function( resp )
+		{
+			if( !resp.error )
+			{
+				if( resp.mimeType == 'application/vnd.google-apps.folder' )
+				{
+					// If a single folder is opened, don't start the returned relative paths with this folder's name
+					// Otherwise, start the relative paths with the folder's name to distinguish between all opened files and folders
+					var relativePath = openedMultipleFilesAtOnce ? (resp.name + "/") : "";
+					getDownloadLinksInFolderRecursively( fileId, relativePath );
+				}
+				else
+				{
+					resp.id = fileId;
+					onFileRetrieved(resp.name, resp, true);
+					downloadLinksForOpenedFileOrFolderAreGenerated();
+				}
+			}
+			else
+				handleError( resp.error );
+		});
+	}
+	
+	function downloadLinksForOpenedFileOrFolderAreGenerated()
+	{
+		if( openedFileIdsStack.length > 0 )
+			getDownloadLinkForOpenedFileOrFolder( openedFileIdsStack.shift() );
+		else
+			statusText.innerHTML = "<b>Status: <span style=\"color:green;\">finished</span></b>";
+	}
+	
+	function getDownloadLinksInFolderRecursively( folderId, relativePath )
+	{
+		var getFiles = function(request) 
+		{
+			request.execute(function(resp) 
+			{
+				if( !resp.error )
+				{
+					var files = resp.files;
+					if (files && files.length > 0) 
+					{
+						for (var i = 0; i < files.length; i++) 
+							onFileRetrieved(relativePath + files[i].name, files[i], false);
+					}
+					
+					if (resp.nextPageToken)
+						getFiles(getListFilesRequest(folderId, false, resp.nextPageToken));
+					else
+					{
+						if( waitingFoldersStack.length > 0 )
+						{
+							var folderToEnter = waitingFoldersStack.shift();
+							console.log( "Entering folder: " + folderToEnter._relativePath );
+							getDownloadLinksInFolderRecursively( folderToEnter._id, folderToEnter._relativePath );
+						}
+						else
+							downloadLinksForOpenedFileOrFolderAreGenerated();
+					}
+				}
+				else
+					handleError( resp.error );
+			});
+		};
+		
+		var getFolders = function(request) 
+		{
+			request.execute(function(resp) 
+			{
+				if( !resp.error )
+				{
+					var folders = resp.files;
+					if (folders && folders.length > 0) 
+					{
+						for (var i = 0; i < folders.length; i++) 
+						{
+							var folder = folders[i];
+							if (folder.webViewLink)
+								onPreviewLinkRetrieved(relativePath + folder.name + "/", folder.webViewLink);
+							
+							waitingFoldersStack.push( { _id: folder.id, _relativePath: relativePath + folder.name + "/" } );
+						}
+					}
+					
+					if (resp.nextPageToken)
+						getFolders(getListFilesRequest(folderId, true, resp.nextPageToken));
+					else
+						getFiles(getListFilesRequest(folderId, false, null));
+				}
+				else
+					handleError( resp.error );
+			});
+		};
+		
+		getFolders(getListFilesRequest(folderId, true, null));
+	}
+	
+	function getListFilesRequest(folderId, listFolders, nextPageToken)
+	{
+		var query =
+		{
+			'q': "trashed=false and '" + folderId + "' in parents and mimeType " + (listFolders ? "=" : "!=") + " 'application/vnd.google-apps.folder'",
+			'pageSize': 1000,
+			'fields': "nextPageToken, files(id, name, webViewLink" + (listFolders ? "" : ", webContentLink") + ")",
+			'includeItemsFromAllDrives': "true",
+			'supportsAllDrives': "true"
+		};
+		
+		if (nextPageToken != null)
+			query.pageToken = nextPageToken;
+		
+		return gapi.client.drive.files.list(query);
+	}
+	
+	function handleError( err )
+	{
+		console.log( "ERROR: " + JSON.stringify( err ) );
+		
+		var reason = "";
+		var msg = "";
+		
+		if( err.errors && err.errors.length > 0 )
+		{
+			reason = err.errors[0].reason;
+			msg = err.errors[0].message;
+		}
+		else if( err.data && err.data.length > 0 )
+		{
+			reason = err.data[0].reason;
+			msg = err.data[0].message;
+		}
+		
+		if( err.code == 401 )
+		{
+			handleAuthClick();
+		}
+		else if( err.code == 403 )
+		{
+			if( reason == "rateLimitExceeded" || reason == "userRateLimitExceeded" )
+				errorText.innerHTML = "Too many requests; try again in a minute.";
+			else if( reason == "dailyLimitExceeded" )
+				errorText.innerHTML = "App reached daily limit (just wow O_O ); service will be available tomorrow.";
+			else
+				errorText.innerHTML = err.code + ": " + err.message + "(" + reason + ": " + msg + ")\r\n";
+		}
+		else
+		{
+			errorText.innerHTML = err.code + ": " + err.message + " (" + reason + ": " + msg + ")\r\n";
+		}
+		
+		statusText.innerHTML = "<b>Status: <span style=\"color:red;\">see error log below</span></b>";
+	}
+	
+	function onFileRetrieved(relativePath, file, showWarningForUnavailableFiles)
+	{
+		if (file.webContentLink || showWarningForUnavailableFiles)
+			onDownloadLinkRetrieved(relativePath, file.webContentLink);
+		if (file.webViewLink || showWarningForUnavailableFiles)
+			onPreviewLinkRetrieved(relativePath, file.webViewLink);
+		if (file.id || showWarningForUnavailableFiles)
+			onEmbedLinkRetrieved(relativePath, file.id ? ("https://lh3.googleusercontent.com/d/" + file.id) : null); // Credit: https://stackoverflow.com/a/70143719/2373034
+	}
+	
+	function onDownloadLinkRetrieved(relativePath, link)
+	{
+		updateResult(relativePath, link, resultDownloadLinksText, resultDownloadLinksTable);
+	}
+	
+	function onPreviewLinkRetrieved(relativePath, link)
+	{
+		updateResult(relativePath, link, resultPreviewLinksText, resultPreviewLinksTable);
+	}
+	
+	function onEmbedLinkRetrieved(relativePath, link)
+	{
+		updateResult(relativePath, link, resultEmbedLinksText, resultEmbedLinksTable);
+	}
+	
+	function updateResult(relativePath, link, resultText, resultTable)
+	{
+		var newRow = resultTable.insertRow(-1);
+		newRow.insertCell(0).innerHTML = "<pre>" + relativePath + "</pre>";
+		if (link != null)
+		{
+			resultText.innerHTML += relativePath + " <a href=\"" + link + "\">" + link + "</a>\r\n";
+			newRow.insertCell(1).innerHTML = "<pre><a href=\"" + link + "\">" + link + "</a></pre>";
+		}
+		else
+		{
+			resultText.innerHTML += relativePath + " Link couldn't be fetched\r\n";
+			newRow.insertCell(1).innerHTML = "<pre>Link couldn't be fetched</pre>";
+		}
+	}
+	
+	function onResultsDisplayMethodChanged(checkbox)
+	{
+		resultDownloadLinksText.style.display = resultPreviewLinksText.style.display = resultEmbedLinksText.style.display = checkbox.checked ? 'none' : 'table';
+		resultDownloadLinksTable.style.display = resultPreviewLinksTable.style.display = resultEmbedLinksTable.style.display = checkbox.checked ? 'table' : 'none';
+	}
+	
+	function onResultsTypeChanged(resultsType)
+	{
+		resultDownloadLinksHolder.style.display = (resultsType == "0") ? 'block' : 'none';
+		resultPreviewLinksHolder.style.display = (resultsType == "1") ? 'block' : 'none';
+		resultEmbedLinksHolder.style.display = (resultsType == "2") ? 'block' : 'none';
+	}
+	
+	// Credit: https://css-tricks.com/snippets/javascript/get-url-variables/
+	function getQueryVariable( variable )
+	{
+		var query = window.location.search;
+		if( !query || query.length === 0 )
+			return "";
+		
+		var vars = query.substring( 1 ).split( "&" );
+		for( var i = 0; i < vars.length; i++ )
+		{
+			var pair = vars[i].split( "=" );
+			if( pair[0] == variable )
+				return decodeURIComponent( pair[1].replace( /\+/g, ' ' ) );
+		}
+		
+		return "";
+	}
+	</script>
+	<script async defer src="https://apis.google.com/js/api.js"
+		onload="this.onload=function(){};gapiLoaded()"
+		onreadystatechange="if (this.readyState === 'complete') this.onload()">
+	</script>
+	<script async defer src="https://accounts.google.com/gsi/client"
+		onload="this.onload=function(){};gisLoaded()"
+		onreadystatechange="if (this.readyState === 'complete') this.onload()">
+	</script>
+</body>
+</html>
